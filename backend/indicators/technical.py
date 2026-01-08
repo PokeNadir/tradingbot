@@ -48,16 +48,23 @@ class TechnicalIndicators:
         Returns:
             DataFrame enrichi avec tous les indicateurs
         """
+        if df is None or df.empty or len(df) < 20:
+            logger.warning(f"Not enough data for indicators: {len(df) if df is not None else 0} rows")
+            return df if df is not None else pd.DataFrame()
+
         df = df.copy()
-        df = self.add_rsi(df)
-        df = self.add_macd(df)
-        df = self.add_bollinger_bands(df)
-        df = self.add_atr(df)
-        df = self.add_emas(df)
-        df = self.add_adx(df)
-        df = self.add_stochastic(df)
-        df = self.add_trend_filter(df)
-        df = self.add_volume_indicators(df)
+        try:
+            df = self.add_rsi(df)
+            df = self.add_macd(df)
+            df = self.add_bollinger_bands(df)
+            df = self.add_atr(df)
+            df = self.add_emas(df)
+            df = self.add_adx(df)
+            df = self.add_stochastic(df)
+            df = self.add_trend_filter(df)
+            df = self.add_volume_indicators(df)
+        except Exception as e:
+            logger.error(f"Error calculating indicators: {e}")
         return df
 
     def add_rsi(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -299,10 +306,13 @@ class TechnicalIndicators:
         Returns:
             Dict avec les valeurs actuelles
         """
-        if df.empty:
+        if df is None or df.empty or len(df) == 0:
             return {}
 
-        last = df.iloc[-1]
+        try:
+            last = df.iloc[-1]
+        except (IndexError, KeyError):
+            return {}
 
         def safe_round(val, decimals=2):
             return round(val, decimals) if pd.notna(val) else None

@@ -99,37 +99,58 @@ async def data_update_loop():
         try:
             for symbol in CONFIG.get('symbols', []):
                 # Fetch data for all timeframes
-                data = await data_fetcher.fetch_multi_timeframe(symbol)
+                try:
+                    data = await data_fetcher.fetch_multi_timeframe(symbol)
+                except Exception as fetch_error:
+                    logger.warning(f"Failed to fetch data for {symbol}: {fetch_error}")
+                    continue
 
                 if data:
                     # Generate signals on primary timeframe
                     primary_tf = CONFIG.get('timeframes', {}).get('primary', '15m')
                     if primary_tf in data:
                         df = data[primary_tf]
-                        signals = signal_generator.generate_all_signals(df, symbol)
+
+                        # Vérifier que le DataFrame a assez de données
+                        if df is None or df.empty or len(df) < 50:
+                            logger.debug(f"Not enough data for {symbol}: {len(df) if df is not None else 0} rows")
+                            continue
+
+                        try:
+                            signals = signal_generator.generate_all_signals(df.copy(), symbol)
+                        except Exception as signal_error:
+                            logger.warning(f"Failed to generate signals for {symbol}: {signal_error}")
+                            signals = []
 
                         # Check for trade proposals
                         for signal in signals:
-                            if signal['strength'] >= 0.7:
+                            if signal.get('strength', 0) >= 0.7:
                                 logger.info(
-                                    f"Strong signal: {signal['type']} on {symbol} "
-                                    f"({signal['strength']:.0%})"
+                                    f"Strong signal: {signal.get('type')} on {symbol} "
+                                    f"({signal.get('strength', 0):.0%})"
                                 )
 
                         # Broadcast to WebSocket clients
-                        ticker = await data_fetcher.fetch_ticker(symbol)
+                        try:
+                            ticker = await data_fetcher.fetch_ticker(symbol)
+                        except Exception as ticker_error:
+                            logger.warning(f"Failed to fetch ticker for {symbol}: {ticker_error}")
+                            ticker = {'symbol': symbol, 'last': 0}
+
                         await manager.broadcast({
                             'type': 'update',
                             'symbol': symbol,
                             'ticker': ticker,
                             'signals': signals,
-                            'portfolio': portfolio.get_summary()
+                            'portfolio': portfolio.get_summary() if portfolio else {}
                         })
 
             await asyncio.sleep(update_interval)
 
         except Exception as e:
             logger.error(f"Error in data update loop: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             await asyncio.sleep(update_interval)
 
 

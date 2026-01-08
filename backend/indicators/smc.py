@@ -123,13 +123,30 @@ class SmartMoneyConcepts:
         Returns:
             DataFrame enrichi avec colonnes SMC
         """
+        if df is None or df.empty or len(df) < 30:
+            # Retourner le DataFrame avec colonnes vides si pas assez de données
+            if df is not None:
+                df = df.copy()
+                df['swing_high'] = 0.0
+                df['swing_low'] = 0.0
+                df['market_bias'] = 0
+                df['in_kill_zone'] = False
+                df['kill_zone_name'] = ''
+            return df
+
         df = df.copy()
-        df = self._identify_swing_points(df)
-        df = self._identify_fvg(df)
-        df = self._identify_order_blocks(df)
-        df = self._identify_structure_breaks(df)
-        df['market_bias'] = self._calculate_market_bias(df)
-        df = self._add_kill_zones(df)
+        try:
+            df = self._identify_swing_points(df)
+            df = self._identify_fvg(df)
+            df = self._identify_order_blocks(df)
+            df = self._identify_structure_breaks(df)
+            df['market_bias'] = self._calculate_market_bias(df)
+            df = self._add_kill_zones(df)
+        except Exception as e:
+            logger.warning(f"Error in SMC analysis: {e}")
+            df['market_bias'] = 0
+            df['in_kill_zone'] = False
+            df['kill_zone_name'] = ''
         return df
 
     def _identify_swing_points(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -340,18 +357,24 @@ class SmartMoneyConcepts:
         """
         bias = pd.Series(0, index=df.index)
 
+        if len(df) == 0:
+            return bias
+
         if len(self.swing_highs) >= 2 and len(self.swing_lows) >= 2:
             last_highs = self.swing_highs[-2:]
             last_lows = self.swing_lows[-2:]
 
-            # Higher highs and higher lows = bullish (uptrend)
-            if (last_highs[-1].price > last_highs[-2].price and
-                last_lows[-1].price > last_lows[-2].price):
-                bias.iloc[-1] = 1
-            # Lower highs and lower lows = bearish (downtrend)
-            elif (last_highs[-1].price < last_highs[-2].price and
-                  last_lows[-1].price < last_lows[-2].price):
-                bias.iloc[-1] = -1
+            try:
+                # Higher highs and higher lows = bullish (uptrend)
+                if (last_highs[-1].price > last_highs[-2].price and
+                    last_lows[-1].price > last_lows[-2].price):
+                    bias.iloc[-1] = 1
+                # Lower highs and lower lows = bearish (downtrend)
+                elif (last_highs[-1].price < last_highs[-2].price and
+                      last_lows[-1].price < last_lows[-2].price):
+                    bias.iloc[-1] = -1
+            except (IndexError, KeyError):
+                pass
 
         return bias
 
