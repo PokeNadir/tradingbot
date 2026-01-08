@@ -70,15 +70,13 @@ async def get_trades(limit: int = Query(default=20, le=100)):
     }
 
 
-@router.get("/ticker/{symbol}")
-async def get_ticker(symbol: str):
+@router.get("/ticker/{base}/{quote}")
+async def get_ticker(base: str, quote: str):
     """Retourne le ticker pour un symbole."""
     if data_fetcher is None:
         raise HTTPException(status_code=503, detail="Data fetcher not initialized")
 
-    symbol = symbol.upper()
-    if '/' not in symbol:
-        symbol = f"{symbol}/USDT"
+    symbol = f"{base.upper()}/{quote.upper()}"
 
     try:
         ticker = await data_fetcher.fetch_ticker(symbol)
@@ -100,9 +98,10 @@ async def get_all_tickers():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/ohlcv/{symbol}")
+@router.get("/ohlcv/{base}/{quote}")
 async def get_ohlcv(
-    symbol: str,
+    base: str,
+    quote: str,
     timeframe: str = Query(default="15m"),
     limit: int = Query(default=100, le=500)
 ):
@@ -110,9 +109,7 @@ async def get_ohlcv(
     if data_fetcher is None:
         raise HTTPException(status_code=503, detail="Data fetcher not initialized")
 
-    symbol = symbol.upper()
-    if '/' not in symbol:
-        symbol = f"{symbol}/USDT"
+    symbol = f"{base.upper()}/{quote.upper()}"
 
     try:
         df = await data_fetcher.fetch_ohlcv(symbol, timeframe, limit)
@@ -125,15 +122,13 @@ async def get_ohlcv(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/signals/{symbol}")
-async def get_signals(symbol: str):
+@router.get("/signals/{base}/{quote}")
+async def get_signals(base: str, quote: str):
     """Génère les signaux pour un symbole."""
     if data_fetcher is None or signal_generator is None:
         raise HTTPException(status_code=503, detail="Services not initialized")
 
-    symbol = symbol.upper()
-    if '/' not in symbol:
-        symbol = f"{symbol}/USDT"
+    symbol = f"{base.upper()}/{quote.upper()}"
 
     try:
         df = await data_fetcher.fetch_ohlcv(symbol, "15m", 500)
@@ -147,15 +142,13 @@ async def get_signals(symbol: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/analysis/{symbol}")
-async def get_analysis(symbol: str):
+@router.get("/analysis/{base}/{quote}")
+async def get_analysis(base: str, quote: str):
     """Retourne l'analyse complète d'un symbole."""
     if data_fetcher is None or signal_generator is None:
         raise HTTPException(status_code=503, detail="Services not initialized")
 
-    symbol = symbol.upper()
-    if '/' not in symbol:
-        symbol = f"{symbol}/USDT"
+    symbol = f"{base.upper()}/{quote.upper()}"
 
     try:
         df = await data_fetcher.fetch_ohlcv(symbol, "15m", 500)

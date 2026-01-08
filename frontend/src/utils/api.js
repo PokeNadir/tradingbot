@@ -32,19 +32,23 @@ export async function getTrades(limit = 20) {
 }
 
 export async function getTicker(symbol) {
-  return fetchAPI(`/api/ticker/${symbol}`)
+  const [base, quote] = symbol.split('/')
+  return fetchAPI(`/api/ticker/${base}/${quote}`)
 }
 
 export async function getOHLCV(symbol, timeframe = '15m', limit = 100) {
-  return fetchAPI(`/api/ohlcv/${symbol}?timeframe=${timeframe}&limit=${limit}`)
+  const [base, quote] = symbol.split('/')
+  return fetchAPI(`/api/ohlcv/${base}/${quote}?timeframe=${timeframe}&limit=${limit}`)
 }
 
 export async function getSignals(symbol) {
-  return fetchAPI(`/api/signals/${symbol}`)
+  const [base, quote] = symbol.split('/')
+  return fetchAPI(`/api/signals/${base}/${quote}`)
 }
 
 export async function getAnalysis(symbol) {
-  return fetchAPI(`/api/analysis/${symbol}`)
+  const [base, quote] = symbol.split('/')
+  return fetchAPI(`/api/analysis/${base}/${quote}`)
 }
 
 export async function executeTrade(signal) {
