@@ -40,7 +40,8 @@ export default function Dashboard({
 
   async function fetchOHLCV() {
     try {
-      const response = await fetch(`/api/ohlcv/${encodeURIComponent(selectedSymbol)}?timeframe=15m&limit=200`)
+      const [base, quote] = selectedSymbol.split('/')
+      const response = await fetch(`/api/ohlcv/${base}/${quote}?timeframe=15m&limit=200`)
       if (response.ok) {
         const data = await response.json()
         setOhlcvData(data.ohlcv || [])
@@ -52,7 +53,8 @@ export default function Dashboard({
 
   async function fetchAnalysis() {
     try {
-      const response = await fetch(`/api/analysis/${encodeURIComponent(selectedSymbol)}`)
+      const [base, quote] = selectedSymbol.split('/')
+      const response = await fetch(`/api/analysis/${base}/${quote}`)
       if (response.ok) {
         const data = await response.json()
         setAnalysis(data)
