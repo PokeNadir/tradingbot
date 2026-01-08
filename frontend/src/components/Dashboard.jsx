@@ -11,11 +11,11 @@ import { formatCurrency, formatPercent } from '../utils/calculations'
 const SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']
 
 export default function Dashboard({
-  portfolio,
-  positions,
-  signals,
-  tickers,
-  connected,
+  portfolio = null,
+  positions = [],
+  signals = [],
+  tickers = {},
+  connected = false,
   onExecuteTrade,
   onClosePosition
 }) {
