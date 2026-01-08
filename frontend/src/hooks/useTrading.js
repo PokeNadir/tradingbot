@@ -6,6 +6,7 @@ export function useTrading() {
   const [positions, setPositions] = useState([])
   const [signals, setSignals] = useState([])
   const [tickers, setTickers] = useState({})
+  const [closedPositions, setClosedPositions] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
@@ -81,11 +82,24 @@ export function useTrading() {
         [wsData.symbol]: wsData.ticker
       }))
     }
+    // Handle bulk tickers update from data loop
+    if (wsData.tickers) {
+      setTickers(wsData.tickers)
+    }
     if (wsData.signals) {
       setSignals(wsData.signals)
     }
     if (wsData.portfolio) {
       setPortfolio(wsData.portfolio)
+    }
+    if (wsData.positions) {
+      setPositions(wsData.positions)
+    }
+    // Handle auto-closed positions (SL/TP hit)
+    if (wsData.closed_positions && wsData.closed_positions.length > 0) {
+      setClosedPositions(wsData.closed_positions)
+    } else {
+      setClosedPositions([])
     }
   }, [])
 
@@ -94,6 +108,7 @@ export function useTrading() {
     positions,
     signals,
     tickers,
+    closedPositions,
     loading,
     error,
     fetchPortfolio,

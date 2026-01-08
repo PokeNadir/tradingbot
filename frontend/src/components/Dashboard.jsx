@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import PriceChart from './PriceChart'
 import TradeProposal from './TradeProposal'
 import IndicatorGauge from './IndicatorGauge'
@@ -29,6 +29,29 @@ const TIMEFRAMES = [
   { value: '1d', label: '1D' },
 ]
 
+// Load watchlist from localStorage
+const loadWatchlist = () => {
+  try {
+    const saved = localStorage.getItem('trading_watchlist')
+    if (saved) {
+      return JSON.parse(saved)
+    }
+  } catch (e) {
+    console.error('Error loading watchlist:', e)
+  }
+  // Default: BTC and ETH
+  return ['BTC/USDT', 'ETH/USDT']
+}
+
+// Save watchlist to localStorage
+const saveWatchlist = (watchlist) => {
+  try {
+    localStorage.setItem('trading_watchlist', JSON.stringify(watchlist))
+  } catch (e) {
+    console.error('Error saving watchlist:', e)
+  }
+}
+
 export default function Dashboard({
   portfolio = null,
   positions = [],
@@ -36,7 +59,8 @@ export default function Dashboard({
   tickers = {},
   connected = false,
   onExecuteTrade,
-  onClosePosition
+  onClosePosition,
+  closedPositions = []
 }) {
   const [selectedSymbol, setSelectedSymbol] = useState('BTC/USDT')
   const [selectedTimeframe, setSelectedTimeframe] = useState('15m')
@@ -47,6 +71,62 @@ export default function Dashboard({
   const [loading, setLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [showSymbolDropdown, setShowSymbolDropdown] = useState(false)
+  const [showWatchlistPanel, setShowWatchlistPanel] = useState(false)
+  const [watchlist, setWatchlist] = useState(loadWatchlist)
+  const [notifications, setNotifications] = useState([])
+
+  // Toggle a symbol in the watchlist
+  const toggleWatchlistSymbol = useCallback((symbol) => {
+    setWatchlist(prev => {
+      const newList = prev.includes(symbol)
+        ? prev.filter(s => s !== symbol)
+        : [...prev, symbol]
+      saveWatchlist(newList)
+      return newList
+    })
+  }, [])
+
+  // Select/deselect all symbols in a group
+  const toggleGroup = useCallback((groupSymbols) => {
+    setWatchlist(prev => {
+      const allSelected = groupSymbols.every(s => prev.includes(s))
+      let newList
+      if (allSelected) {
+        newList = prev.filter(s => !groupSymbols.includes(s))
+      } else {
+        newList = [...new Set([...prev, ...groupSymbols])]
+      }
+      saveWatchlist(newList)
+      return newList
+    })
+  }, [])
+
+  // Filter signals to only show watchlist symbols
+  const watchlistSignals = useMemo(() => {
+    return signals.filter(s => watchlist.includes(s.symbol))
+  }, [signals, watchlist])
+
+  // Add notification when position is auto-closed
+  useEffect(() => {
+    if (closedPositions && closedPositions.length > 0) {
+      const newNotifs = closedPositions.map(pos => ({
+        id: Date.now() + Math.random(),
+        type: pos.close_reason === 'take_profit' ? 'success' : 'warning',
+        title: pos.close_reason === 'take_profit' ? 'Take Profit Hit!' : 'Stop Loss Hit!',
+        message: `${pos.symbol} closed at ${pos.exit_price?.toFixed(2)} | P&L: ${pos.net_pnl?.toFixed(2)}`,
+        timestamp: Date.now()
+      }))
+      setNotifications(prev => [...newNotifs, ...prev].slice(0, 5))
+    }
+  }, [closedPositions])
+
+  // Auto-dismiss notifications after 10s
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNotifications(prev => prev.filter(n => Date.now() - n.timestamp < 10000))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [])
 
   // Filter symbols based on search query
   const filteredSymbols = useMemo(() => {
@@ -136,6 +216,19 @@ export default function Dashboard({
               <span className={`w-2 h-2 rounded-full ${connected ? 'bg-accent-green' : 'bg-accent-red'}`}></span>
               {connected ? 'Connected' : 'Disconnected'}
             </div>
+            {/* Watchlist Button */}
+            <button
+              onClick={() => setShowWatchlistPanel(!showWatchlistPanel)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                showWatchlistPanel ? 'bg-accent-blue text-white' : 'bg-dark-surface text-gray-300 hover:bg-dark-border'
+              }`}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+              Watchlist ({watchlist.length})
+            </button>
           </div>
 
           {/* Symbol Selector with Search */}
@@ -253,6 +346,123 @@ export default function Dashboard({
         />
       )}
 
+      {/* Watchlist Panel */}
+      {showWatchlistPanel && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/50"
+            onClick={() => setShowWatchlistPanel(false)}
+          />
+          <div className="fixed top-20 left-6 z-50 w-80 bg-dark-card border border-dark-border rounded-xl shadow-xl">
+            <div className="p-4 border-b border-dark-border">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold">Watchlist Settings</h3>
+                <button
+                  onClick={() => setShowWatchlistPanel(false)}
+                  className="text-gray-400 hover:text-white"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <p className="text-sm text-gray-400 mt-1">
+                Select pairs to receive trade notifications
+              </p>
+            </div>
+            <div className="max-h-96 overflow-y-auto p-2">
+              {Object.entries(SYMBOL_GROUPS).map(([group, symbols]) => {
+                const allSelected = symbols.every(s => watchlist.includes(s))
+                const someSelected = symbols.some(s => watchlist.includes(s))
+                return (
+                  <div key={group} className="mb-3">
+                    <div className="flex items-center gap-2 px-2 py-1">
+                      <button
+                        onClick={() => toggleGroup(symbols)}
+                        className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                          allSelected
+                            ? 'bg-accent-blue border-accent-blue'
+                            : someSelected
+                            ? 'bg-accent-blue/50 border-accent-blue'
+                            : 'border-gray-500 hover:border-gray-400'
+                        }`}
+                      >
+                        {(allSelected || someSelected) && (
+                          <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </button>
+                      <span className="text-xs text-gray-400 uppercase font-medium">{group}</span>
+                    </div>
+                    <div className="space-y-1">
+                      {symbols.map(symbol => (
+                        <button
+                          key={symbol}
+                          onClick={() => toggleWatchlistSymbol(symbol)}
+                          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-dark-surface transition-colors"
+                        >
+                          <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                            watchlist.includes(symbol)
+                              ? 'bg-accent-blue border-accent-blue'
+                              : 'border-gray-500'
+                          }`}>
+                            {watchlist.includes(symbol) && (
+                              <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </div>
+                          <span className="font-medium">{symbol.replace('/USDT', '')}</span>
+                          <span className="text-gray-500 text-sm">/USDT</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="p-3 border-t border-dark-border bg-dark-surface/50 rounded-b-xl">
+              <p className="text-xs text-gray-400 text-center">
+                {watchlist.length} pairs selected • {watchlistSignals.length} active signals
+              </p>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Notifications */}
+      <div className="fixed top-20 right-6 z-50 space-y-2 pointer-events-none">
+        {notifications.map(notif => (
+          <div
+            key={notif.id}
+            className={`pointer-events-auto p-4 rounded-xl shadow-xl border backdrop-blur-sm animate-slide-in ${
+              notif.type === 'success'
+                ? 'bg-accent-green/20 border-accent-green/50 text-accent-green'
+                : 'bg-accent-yellow/20 border-accent-yellow/50 text-accent-yellow'
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <div className={`p-1 rounded-full ${notif.type === 'success' ? 'bg-accent-green' : 'bg-accent-yellow'}`}>
+                {notif.type === 'success' ? (
+                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                )}
+              </div>
+              <div>
+                <p className="font-semibold">{notif.title}</p>
+                <p className="text-sm opacity-80">{notif.message}</p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
       <main className="p-6">
         <div className="grid grid-cols-12 gap-6">
           {/* Left Column - Chart and Signals */}
@@ -356,6 +566,56 @@ export default function Dashboard({
               tickers={tickers}
               onClosePosition={onClosePosition}
             />
+
+            {/* Watchlist Signals */}
+            <div className="bg-dark-card rounded-xl p-4 border border-dark-border">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold">Watchlist Signals</h3>
+                {watchlistSignals.length > 0 && (
+                  <span className="px-2 py-0.5 bg-accent-blue/20 text-accent-blue text-xs rounded-full">
+                    {watchlistSignals.length} active
+                  </span>
+                )}
+              </div>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {watchlistSignals.length > 0 ? (
+                  watchlistSignals.map((signal, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-3 rounded-lg border-l-4 cursor-pointer hover:bg-dark-surface transition-colors ${
+                        signal.type === 'long' || signal.direction === 'long'
+                          ? 'border-accent-green bg-accent-green/5'
+                          : 'border-accent-red bg-accent-red/5'
+                      }`}
+                      onClick={() => setSelectedSymbol(signal.symbol)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+                            signal.type === 'long' || signal.direction === 'long'
+                              ? 'bg-accent-green/20 text-accent-green'
+                              : 'bg-accent-red/20 text-accent-red'
+                          }`}>
+                            {(signal.type || signal.direction || '').toUpperCase()}
+                          </span>
+                          <span className="font-medium">{signal.symbol?.replace('/USDT', '')}</span>
+                        </div>
+                        <span className="text-xs text-gray-400">
+                          {Math.round((signal.strength || signal.confidence || 0) * 100)}%
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-1 truncate">
+                        {signal.reason || signal.description || 'Trade signal'}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-gray-400 text-center py-4 text-sm">
+                    No signals for watched pairs
+                  </p>
+                )}
+              </div>
+            </div>
 
             {/* Risk Status */}
             {riskData && (

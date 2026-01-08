@@ -34,6 +34,7 @@ function App() {
       positions={trading.positions}
       signals={trading.signals}
       tickers={trading.tickers}
+      closedPositions={trading.closedPositions}
       connected={connected}
       onExecuteTrade={(signal) => send({ type: 'execute_trade', signal })}
       onClosePosition={(id, price) => send({ type: 'close_position', position_id: id, current_price: price })}
