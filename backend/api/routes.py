@@ -119,7 +119,7 @@ async def get_ohlcv(
         return {
             "symbol": symbol,
             "timeframe": timeframe,
-            "data": df.reset_index().to_dict(orient='records')
+            "ohlcv": df.reset_index().to_dict(orient='records')
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
