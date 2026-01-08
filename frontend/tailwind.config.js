@@ -12,6 +12,10 @@ export default {
           800: '#12121a',
           700: '#1a1a25',
           600: '#252535',
+          'bg': '#0a0a0f',
+          'card': '#12121a',
+          'surface': '#1a1a25',
+          'border': '#252535',
         },
         'accent': {
           green: '#00ff88',
