@@ -1,0 +1,309 @@
+# ============================================================================
+# Configuration principale du bot de trading
+# Référence: TRADING_STRATEGIES_GUIDE.md pour les détails des paramètres
+# ============================================================================
+
+# Mode de fonctionnement
+mode: "paper"  # "paper" ou "live"
+
+# Capital initial
+paper_trading:
+  initial_capital: 10000
+  currency: "USDT"
+
+# Exchange configuration
+exchange:
+  name: "binance"
+  testnet: true
+  rate_limit: true
+
+# Symboles à trader
+symbols:
+  - "BTC/USDT"
+  - "ETH/USDT"
+  - "SOL/USDT"
+
+# Timeframes (Multi-Timeframe Analysis)
+timeframes:
+  primary: "15m"       # Timeframe d'exécution
+  confirmation: "1h"   # Confirmation de tendance
+  trend: "4h"          # Biais de tendance HTF
+
+# ============================================================================
+# INDICATEURS TECHNIQUES
+# Paramètres optimisés selon le Guide de Stratégies
+# ============================================================================
+indicators:
+  # RSI - Relative Strength Index
+  rsi:
+    period: 14
+    overbought: 70        # Standard
+    oversold: 30          # Standard
+    overbought_crypto: 80 # Pour crypto volatile
+    oversold_crypto: 20   # Pour crypto volatile
+
+  # MACD - Moving Average Convergence Divergence
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+
+  # Bollinger Bands
+  bollinger:
+    period: 20
+    std_dev: 2.0
+    squeeze_threshold: 0.75  # BBW < SMA(BBW,50) × 0.75 = squeeze
+
+  # ATR - Average True Range
+  atr:
+    period: 14
+
+  # EMAs - Exponential Moving Averages
+  ema:
+    fast: 9              # Scalping/Momentum
+    slow: 21             # Day trading
+    trend: 50            # Moyen terme
+    long_trend: 200      # Long terme (SMA recommandé)
+
+  # ADX - Average Directional Index
+  adx:
+    period: 14
+    threshold: 25        # ADX > 25 = marché en tendance
+
+  # Stochastic
+  stochastic:
+    k_period: 14
+    d_period: 3
+    overbought: 80
+    oversold: 20
+
+# ============================================================================
+# SMART MONEY CONCEPTS (ICT)
+# ============================================================================
+smc:
+  swing_length: 10
+  fvg_min_size: 0.001          # Taille minimale FVG (0.1%)
+  ob_volume_threshold: 1.5     # Volume OB > 1.5× volume moyen
+  displacement_atr: 2.0        # Displacement = move > ATR × 2
+  liquidity_range: 0.01        # 1% pour identifier liquidité
+
+  # Kill Zones (heures optimales - EST)
+  kill_zones:
+    london_open: "02:00"       # 2:00-5:00 AM EST
+    london_close: "05:00"
+    ny_open: "07:00"           # 7:00-10:00 AM EST
+    ny_close: "10:00"
+    silver_bullet: "10:00"     # 10:00-11:00 AM EST
+    silver_bullet_end: "11:00"
+
+# ============================================================================
+# PATTERNS DE CHANDELIERS
+# ============================================================================
+patterns:
+  hammer:
+    body_ratio: 0.5            # Corps ≤ 50% du range
+    lower_wick_ratio: 2.0      # Mèche inf ≥ 2× corps
+    upper_wick_max: 0.1        # Mèche sup ≤ 10% du range
+
+  engulfing:
+    min_body_ratio: 0.6        # Le corps doit être significatif
+
+  doji:
+    body_max_ratio: 0.05       # Corps ≤ 5% du range
+
+# ============================================================================
+# FIBONACCI
+# ============================================================================
+fibonacci:
+  retracement_levels: [0.236, 0.382, 0.5, 0.618, 0.786]
+  extension_levels: [1.272, 1.618, 2.0, 2.618]
+  golden_ratio: 0.618          # Niveau le plus important
+
+# ============================================================================
+# GESTION DES RISQUES
+# Règles ABSOLUES - Ne jamais dépasser ces limites
+# ============================================================================
+risk_management:
+  # Position Sizing
+  max_risk_per_trade: 0.01     # 1% max par trade (RECOMMANDÉ)
+  max_risk_per_trade_max: 0.02 # 2% MAXIMUM ABSOLU
+  max_risk_per_day: 0.03       # 3% perte max journalière
+  max_risk_total: 0.06         # 6% exposition totale max
+  max_open_positions: 3
+  default_leverage: 1
+
+  # Kelly Criterion
+  kelly_fraction: 0.25         # Utiliser 25% du Kelly (Quarter-Kelly)
+
+  # Stop Loss (basé sur ATR)
+  stop_loss:
+    type: "atr"
+    atr_multiplier_day: 1.5    # Day trading: 1.5-2.0× ATR
+    atr_multiplier_swing: 2.0  # Swing trading: 2.0-2.5× ATR
+    atr_multiplier_position: 2.5 # Position trading: 2.5-3.0× ATR
+    atr_multiplier_volatile: 3.0 # Haute volatilité: 3.0-4.0× ATR
+    fixed_percent: 0.02        # Fallback: 2%
+
+  # Take Profit
+  take_profit:
+    min_risk_reward_ratio: 2.0 # Minimum R:R de 2:1
+    trailing_stop: true
+    trailing_atr_multiplier: 1.0
+
+    # Scaling out progressif
+    scaling_out:
+      enabled: true
+      level_1_percent: 0.33    # 33% à 1R
+      level_1_r: 1.0
+      level_2_percent: 0.33    # 33% à 2R
+      level_2_r: 2.0
+      level_3_percent: 0.34    # 34% trailing
+
+  # Limites de Drawdown
+  drawdown:
+    daily_loss_limit: 0.03     # Stop trading si perte > 3% jour
+    weekly_loss_limit: 0.06    # Réduire taille 50% si > 6% semaine
+    max_drawdown: 0.15         # PAUSE TOTALE si > 15%
+    consecutive_loss_pause: 3  # Pause après 3 pertes consécutives
+    pause_duration_minutes: 15 # Durée de pause minimum
+
+# ============================================================================
+# STRATÉGIES DE TRADING
+# ============================================================================
+strategies:
+  # Mean Reversion (Bollinger + RSI)
+  mean_reversion:
+    enabled: true
+    entry_conditions:
+      long: "price < bb_lower AND rsi < 30"
+      short: "price > bb_upper AND rsi > 70"
+    target: "bb_middle"
+    stop_atr_multiplier: 1.5
+
+  # EMA Crossover
+  ema_crossover:
+    enabled: true
+    fast_ema: 9
+    slow_ema: 21
+    adx_threshold: 25
+    rsi_filter_long: 50        # RSI > 50 pour long
+    rsi_filter_short: 50       # RSI < 50 pour short
+    stop_atr_multiplier: 2.0
+    min_risk_reward: 2.0
+
+  # Breakout
+  breakout:
+    enabled: true
+    lookback_period: 20        # rolling_max/min sur 20 périodes
+    volume_multiplier: 1.5     # Volume > avg × 1.5
+    adx_confirmation: true     # ADX rising vers 25-40
+    stop_atr_multiplier: 1.5
+
+  # Grid Trading
+  grid_trading:
+    enabled: false             # Activer manuellement pour ranging
+    num_grids: 20
+    grid_type: "geometric"     # "arithmetic" ou "geometric"
+
+  # DCA Intelligent
+  dca_smart:
+    enabled: false
+    base_order: 100            # USDT
+    safety_orders: 5
+    scale_multiplier: 1.5
+    rsi_levels: [29, 27.5, 26, 24, 22]
+    price_drops: [0.015, 0.025, 0.04, 0.06, 0.10]
+
+# ============================================================================
+# ANALYSE ON-CHAIN
+# ============================================================================
+onchain:
+  enabled: false               # Activer si API keys disponibles
+
+  # Seuils MVRV
+  mvrv:
+    extreme_euphoria: 3.5      # VENDRE - distribution probable
+    overheated: 2.4            # Prendre profits partiels
+    equilibrium: 1.0           # Neutre
+    undervalued: 0.8           # ACHETER FORT - capitulation
+
+  # Seuils NUPL
+  nupl:
+    euphoria: 0.75             # VENDRE
+    strong_conviction: 0.50    # Réduire exposition
+    capitulation: 0.0          # ACHETER
+
+  # Funding Rates
+  funding:
+    extreme_long: 0.001        # > 0.1% (8h) = correction probable
+    caution: 0.0005            # Prudence sur nouveaux longs
+    short_squeeze: 0.0         # < 0 = setup long squeeze
+
+  # Whale Thresholds
+  whale:
+    btc_threshold: 100         # Transactions > 100 BTC
+    eth_threshold: 1000        # Transactions > 1000 ETH
+    usd_threshold: 500000      # Transactions > $500K
+
+# ============================================================================
+# DÉTECTION DE MANIPULATION
+# ============================================================================
+manipulation:
+  # Order Book Imbalance
+  obi:
+    bullish_threshold: 0.3     # OBI > 0.3 = pression acheteuse
+    bearish_threshold: -0.3    # OBI < -0.3 = pression vendeuse
+
+  # Seuils de sécurité
+  safety:
+    max_spread_percent: 0.002  # Spread max 0.2%
+    max_vol_depth_ratio: 30    # Éviter si > 50
+    max_cancel_rate: 0.6       # Éviter si > 80%
+
+  # Spoofing detection
+  spoofing:
+    order_lifetime_seconds: 1  # Ordre annulé < 1s
+    cancel_rate_threshold: 0.8 # > 80% = spoofing probable
+
+# ============================================================================
+# COÛTS ET FRAIS
+# ============================================================================
+costs:
+  commission_percent: 0.001    # 0.1% par trade (maker/taker moyen)
+  min_profit_threshold: 0.005  # 0.5% minimum pour être rentable
+
+  # Slippage estimé
+  slippage:
+    liquid_majors: 0.0001      # 0.01% BTC/ETH
+    volatile: 0.0005           # 0.05% haute volatilité
+    altcoins: 0.005            # 0.5% altcoins
+
+# ============================================================================
+# VÉRIFICATIONS PRÉ-TRADE
+# ============================================================================
+pre_trade_checks:
+  - "daily_loss < MAX_DAILY_DRAWDOWN"
+  - "consecutive_losses < 3"
+  - "total_exposure < 6%"
+  - "spread < 0.2%"
+  - "sufficient_liquidity"
+  - "not_in_pause_period"
+
+# ============================================================================
+# API SERVER
+# ============================================================================
+api:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins:
+    - "http://localhost:5173"
+    - "http://localhost:3000"
+
+# Mise à jour des données
+data:
+  update_interval: 5           # Secondes entre chaque update
+  history_bars: 500
+
+# Database
+database:
+  path: "data/trades.db"
