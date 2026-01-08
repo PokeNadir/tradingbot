@@ -95,11 +95,17 @@ async def data_update_loop():
     """
     Boucle de mise à jour des données en arrière-plan.
     Récupère les données, calcule les indicateurs, génère les signaux.
+    Vérifie automatiquement les SL/TP sur les positions ouvertes.
     """
     update_interval = CONFIG.get('data', {}).get('update_interval', 5)
 
     while True:
         try:
+            # Collect all current prices for position management
+            current_prices: Dict[str, float] = {}
+            all_signals: List[Dict] = []
+            all_tickers: Dict[str, Dict] = {}
+
             for symbol in CONFIG.get('symbols', []):
                 # Fetch data for all timeframes
                 try:
@@ -125,6 +131,8 @@ async def data_update_loop():
                             logger.warning(f"Failed to generate signals for {symbol}: {signal_error}")
                             signals = []
 
+                        all_signals.extend(signals)
+
                         # Check for trade proposals
                         for signal in signals:
                             if signal.get('strength', 0) >= 0.7:
@@ -133,20 +141,41 @@ async def data_update_loop():
                                     f"({signal.get('strength', 0):.0%})"
                                 )
 
-                        # Broadcast to WebSocket clients
+                        # Fetch ticker and store price
                         try:
                             ticker = await data_fetcher.fetch_ticker(symbol)
+                            all_tickers[symbol] = ticker
+                            current_prices[symbol] = ticker.get('last', 0)
                         except Exception as ticker_error:
                             logger.warning(f"Failed to fetch ticker for {symbol}: {ticker_error}")
                             ticker = {'symbol': symbol, 'last': 0}
+                            all_tickers[symbol] = ticker
 
-                        await manager.broadcast({
-                            'type': 'update',
-                            'symbol': symbol,
-                            'ticker': ticker,
-                            'signals': signals,
-                            'portfolio': portfolio.get_summary() if portfolio else {}
-                        })
+            # AUTO TAKE PROFIT / STOP LOSS CHECK
+            # Update prices and check SL/TP for all positions
+            closed_positions = []
+            if paper_trader and current_prices:
+                try:
+                    closed_positions = await paper_trader.update_prices(current_prices)
+                    if closed_positions:
+                        for pos in closed_positions:
+                            logger.info(
+                                f"Auto-closed position: {pos.get('symbol')} | "
+                                f"Reason: {pos.get('close_reason')} | "
+                                f"P&L: {pos.get('net_pnl', 0):.2f}"
+                            )
+                except Exception as tp_error:
+                    logger.warning(f"Error checking stops: {tp_error}")
+
+            # Broadcast all updates to WebSocket clients
+            await manager.broadcast({
+                'type': 'update',
+                'tickers': all_tickers,
+                'signals': all_signals,
+                'portfolio': portfolio.get_summary() if portfolio else {},
+                'positions': portfolio.get_positions_list() if portfolio else [],
+                'closed_positions': closed_positions
+            })
 
             await asyncio.sleep(update_interval)
 
