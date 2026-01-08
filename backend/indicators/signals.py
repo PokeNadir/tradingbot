@@ -434,6 +434,21 @@ class SignalGenerator:
             else:
                 bias = 'NEUTRAL'
 
+            # Determine trend based on price action
+            trend = 'ranging'
+            if indicators.get('trend_bias', 0) > 0 and indicators.get('adx', 0) > 25:
+                trend = 'uptrend'
+            elif indicators.get('trend_bias', 0) < 0 and indicators.get('adx', 0) > 25:
+                trend = 'downtrend'
+
+            # Build structure info
+            structure = {
+                'bias': bias.lower(),
+                'trend': trend,
+                'support_levels': [],
+                'resistance_levels': []
+            }
+
             return {
                 'symbol': symbol,
                 'bias': bias,
@@ -443,6 +458,7 @@ class SignalGenerator:
                 'patterns': patterns,
                 'divergences': divergences,
                 'smc': smc,
+                'structure': structure,
                 'timestamp': datetime.now().isoformat()
             }
 
