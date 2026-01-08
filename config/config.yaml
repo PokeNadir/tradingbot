@@ -19,9 +19,41 @@ exchange:
 
 # Symboles à trader
 symbols:
+  # Majors
   - "BTC/USDT"
   - "ETH/USDT"
+  # Layer 1
   - "SOL/USDT"
+  - "ADA/USDT"
+  - "AVAX/USDT"
+  - "DOT/USDT"
+  - "MATIC/USDT"
+  - "ATOM/USDT"
+  - "NEAR/USDT"
+  - "FTM/USDT"
+  # Layer 2 / DeFi
+  - "ARB/USDT"
+  - "OP/USDT"
+  - "LINK/USDT"
+  - "UNI/USDT"
+  - "AAVE/USDT"
+  # Meme / Trending
+  - "DOGE/USDT"
+  - "SHIB/USDT"
+  - "PEPE/USDT"
+  # Others
+  - "XRP/USDT"
+  - "LTC/USDT"
+
+# Timeframes disponibles
+available_timeframes:
+  - "1m"
+  - "5m"
+  - "15m"
+  - "30m"
+  - "1h"
+  - "4h"
+  - "1d"
 
 # Timeframes (Multi-Timeframe Analysis)
 timeframes:

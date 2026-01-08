@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import PriceChart from './PriceChart'
 import TradeProposal from './TradeProposal'
 import IndicatorGauge from './IndicatorGauge'
@@ -8,7 +8,26 @@ import OnChainMetrics from './OnChainMetrics'
 import MarketStructure from './MarketStructure'
 import { formatCurrency, formatPercent } from '../utils/calculations'
 
-const SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']
+// All available symbols grouped by category
+const SYMBOL_GROUPS = {
+  'Majors': ['BTC/USDT', 'ETH/USDT'],
+  'Layer 1': ['SOL/USDT', 'ADA/USDT', 'AVAX/USDT', 'DOT/USDT', 'MATIC/USDT', 'ATOM/USDT', 'NEAR/USDT', 'FTM/USDT'],
+  'Layer 2 / DeFi': ['ARB/USDT', 'OP/USDT', 'LINK/USDT', 'UNI/USDT', 'AAVE/USDT'],
+  'Meme': ['DOGE/USDT', 'SHIB/USDT', 'PEPE/USDT'],
+  'Others': ['XRP/USDT', 'LTC/USDT']
+}
+
+const ALL_SYMBOLS = Object.values(SYMBOL_GROUPS).flat()
+
+const TIMEFRAMES = [
+  { value: '1m', label: '1m' },
+  { value: '5m', label: '5m' },
+  { value: '15m', label: '15m' },
+  { value: '30m', label: '30m' },
+  { value: '1h', label: '1H' },
+  { value: '4h', label: '4H' },
+  { value: '1d', label: '1D' },
+]
 
 export default function Dashboard({
   portfolio = null,
@@ -20,17 +39,27 @@ export default function Dashboard({
   onClosePosition
 }) {
   const [selectedSymbol, setSelectedSymbol] = useState('BTC/USDT')
+  const [selectedTimeframe, setSelectedTimeframe] = useState('15m')
   const [ohlcvData, setOhlcvData] = useState([])
   const [analysis, setAnalysis] = useState(null)
   const [trades, setTrades] = useState([])
   const [riskData, setRiskData] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showSymbolDropdown, setShowSymbolDropdown] = useState(false)
 
-  // Fetch OHLCV data when symbol changes
+  // Filter symbols based on search query
+  const filteredSymbols = useMemo(() => {
+    if (!searchQuery) return ALL_SYMBOLS
+    const query = searchQuery.toUpperCase()
+    return ALL_SYMBOLS.filter(s => s.includes(query))
+  }, [searchQuery])
+
+  // Fetch OHLCV data when symbol or timeframe changes
   useEffect(() => {
     fetchOHLCV()
     fetchAnalysis()
-  }, [selectedSymbol])
+  }, [selectedSymbol, selectedTimeframe])
 
   // Fetch trade history on mount
   useEffect(() => {
@@ -39,15 +68,18 @@ export default function Dashboard({
   }, [])
 
   async function fetchOHLCV() {
+    setLoading(true)
     try {
       const [base, quote] = selectedSymbol.split('/')
-      const response = await fetch(`/api/ohlcv/${base}/${quote}?timeframe=15m&limit=200`)
+      const response = await fetch(`/api/ohlcv/${base}/${quote}?timeframe=${selectedTimeframe}&limit=300`)
       if (response.ok) {
         const data = await response.json()
         setOhlcvData(data.ohlcv || [])
       }
     } catch (error) {
       console.error('Error fetching OHLCV:', error)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -106,24 +138,120 @@ export default function Dashboard({
             </div>
           </div>
 
-          {/* Symbol Selector */}
-          <div className="flex items-center gap-2">
-            {SYMBOLS.map(symbol => (
+          {/* Symbol Selector with Search */}
+          <div className="flex items-center gap-4">
+            <div className="relative">
               <button
-                key={symbol}
-                onClick={() => setSelectedSymbol(symbol)}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  selectedSymbol === symbol
-                    ? 'bg-accent-blue text-white'
-                    : 'bg-dark-surface text-gray-400 hover:text-white hover:bg-dark-border'
-                }`}
+                onClick={() => setShowSymbolDropdown(!showSymbolDropdown)}
+                className="flex items-center gap-2 px-4 py-2 bg-dark-surface rounded-lg hover:bg-dark-border transition-colors min-w-[140px]"
               >
-                {symbol.replace('/USDT', '')}
+                <span className="font-bold">{selectedSymbol.replace('/USDT', '')}</span>
+                <span className="text-gray-400 text-sm">/USDT</span>
+                <svg className="w-4 h-4 text-gray-400 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
               </button>
-            ))}
+
+              {/* Symbol Dropdown */}
+              {showSymbolDropdown && (
+                <div className="absolute top-full left-0 mt-2 w-72 bg-dark-card border border-dark-border rounded-xl shadow-xl z-50 max-h-96 overflow-hidden">
+                  {/* Search Input */}
+                  <div className="p-3 border-b border-dark-border">
+                    <input
+                      type="text"
+                      placeholder="Search symbol..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full px-3 py-2 bg-dark-surface rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-accent-blue"
+                      autoFocus
+                    />
+                  </div>
+
+                  {/* Symbol List */}
+                  <div className="max-h-72 overflow-y-auto">
+                    {searchQuery ? (
+                      // Show filtered results
+                      <div className="p-2">
+                        {filteredSymbols.length > 0 ? (
+                          filteredSymbols.map(symbol => (
+                            <button
+                              key={symbol}
+                              onClick={() => {
+                                setSelectedSymbol(symbol)
+                                setShowSymbolDropdown(false)
+                                setSearchQuery('')
+                              }}
+                              className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
+                                selectedSymbol === symbol
+                                  ? 'bg-accent-blue text-white'
+                                  : 'hover:bg-dark-surface text-gray-300'
+                              }`}
+                            >
+                              <span className="font-medium">{symbol.replace('/USDT', '')}</span>
+                              <span className="text-gray-500 text-sm">/USDT</span>
+                            </button>
+                          ))
+                        ) : (
+                          <p className="text-gray-500 text-center py-4">No symbols found</p>
+                        )}
+                      </div>
+                    ) : (
+                      // Show grouped symbols
+                      Object.entries(SYMBOL_GROUPS).map(([group, symbols]) => (
+                        <div key={group} className="p-2">
+                          <p className="text-xs text-gray-500 uppercase px-3 py-1">{group}</p>
+                          {symbols.map(symbol => (
+                            <button
+                              key={symbol}
+                              onClick={() => {
+                                setSelectedSymbol(symbol)
+                                setShowSymbolDropdown(false)
+                              }}
+                              className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
+                                selectedSymbol === symbol
+                                  ? 'bg-accent-blue text-white'
+                                  : 'hover:bg-dark-surface text-gray-300'
+                              }`}
+                            >
+                              <span className="font-medium">{symbol.replace('/USDT', '')}</span>
+                              <span className="text-gray-500 text-sm">/USDT</span>
+                            </button>
+                          ))}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Timeframe Selector */}
+            <div className="flex items-center bg-dark-surface rounded-lg p-1">
+              {TIMEFRAMES.map(tf => (
+                <button
+                  key={tf.value}
+                  onClick={() => setSelectedTimeframe(tf.value)}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                    selectedTimeframe === tf.value
+                      ? 'bg-accent-blue text-white'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {tf.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </header>
+
+      {/* Click outside to close dropdown */}
+      {showSymbolDropdown && (
+        <div
+          className="fixed inset-0 z-40"
+          onClick={() => setShowSymbolDropdown(false)}
+        />
+      )}
 
       <main className="p-6">
         <div className="grid grid-cols-12 gap-6">
@@ -163,13 +291,26 @@ export default function Dashboard({
 
             {/* Price Chart */}
             <div className="bg-dark-card rounded-xl border border-dark-border overflow-hidden">
-              <div className="p-4 border-b border-dark-border">
-                <h3 className="font-semibold">Price Chart</h3>
+              <div className="p-4 border-b border-dark-border flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <h3 className="font-semibold">Price Chart</h3>
+                  <span className="text-sm text-gray-400">{selectedSymbol} • {selectedTimeframe.toUpperCase()}</span>
+                </div>
+                {loading && (
+                  <div className="flex items-center gap-2 text-accent-blue text-sm">
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Loading...
+                  </div>
+                )}
               </div>
-              <div className="h-96">
+              <div className="h-[500px]">
                 <PriceChart
                   data={ohlcvData}
                   symbol={selectedSymbol}
+                  timeframe={selectedTimeframe}
                   indicators={analysis?.indicators}
                 />
               </div>
