@@ -57,37 +57,41 @@ class PatternDetector:
         """
         patterns = []
 
-        if len(df) < 3:
+        if df is None or df.empty or len(df) < 3:
             return patterns
 
-        # Détection sur les dernières bougies
-        hammer = self.detect_hammer(df)
-        if hammer:
-            patterns.append(hammer)
+        try:
+            # Détection sur les dernières bougies
+            hammer = self.detect_hammer(df)
+            if hammer:
+                patterns.append(hammer)
 
-        shooting_star = self.detect_shooting_star(df)
-        if shooting_star:
-            patterns.append(shooting_star)
+            shooting_star = self.detect_shooting_star(df)
+            if shooting_star:
+                patterns.append(shooting_star)
 
-        engulfing = self.detect_engulfing(df)
-        if engulfing:
-            patterns.append(engulfing)
+            engulfing = self.detect_engulfing(df)
+            if engulfing:
+                patterns.append(engulfing)
 
-        star = self.detect_star(df)
-        if star:
-            patterns.append(star)
+            star = self.detect_star(df)
+            if star:
+                patterns.append(star)
 
-        doji = self.detect_doji(df)
-        if doji:
-            patterns.append(doji)
+            doji = self.detect_doji(df)
+            if doji:
+                patterns.append(doji)
 
-        three_soldiers = self.detect_three_soldiers(df)
-        if three_soldiers:
-            patterns.append(three_soldiers)
+            three_soldiers = self.detect_three_soldiers(df)
+            if three_soldiers:
+                patterns.append(three_soldiers)
 
-        three_crows = self.detect_three_crows(df)
-        if three_crows:
-            patterns.append(three_crows)
+            three_crows = self.detect_three_crows(df)
+            if three_crows:
+                patterns.append(three_crows)
+
+        except (IndexError, KeyError) as e:
+            logger.debug(f"Error detecting patterns: {e}")
 
         return patterns
 
@@ -100,35 +104,38 @@ class PatternDetector:
         - Mèche supérieure ≤ 10% du range
         - Doit apparaître en bas de tendance baissière
         """
-        if len(df) < 10:
-            return None
+        try:
+            if len(df) < 10:
+                return None
 
-        config = self.config.get('hammer', {})
-        last = df.iloc[-1]
+            config = self.config.get('hammer', {})
+            last = df.iloc[-1]
 
-        body = abs(last['close'] - last['open'])
-        total_range = last['high'] - last['low']
+            body = abs(last['close'] - last['open'])
+            total_range = last['high'] - last['low']
 
-        if total_range == 0:
-            return None
+            if total_range == 0:
+                return None
 
-        lower_wick = min(last['open'], last['close']) - last['low']
-        upper_wick = last['high'] - max(last['open'], last['close'])
+            lower_wick = min(last['open'], last['close']) - last['low']
+            upper_wick = last['high'] - max(last['open'], last['close'])
 
-        lower_wick_ratio = config.get('lower_wick_ratio', 2.0)
-        upper_wick_max = config.get('upper_wick_max', 0.1)
+            lower_wick_ratio = config.get('lower_wick_ratio', 2.0)
+            upper_wick_max = config.get('upper_wick_max', 0.1)
 
-        if lower_wick >= (lower_wick_ratio * body) and upper_wick <= (upper_wick_max * total_range):
-            # Vérifier tendance baissière précédente
-            prev_closes = df['close'].iloc[-10:-1]
-            if prev_closes.iloc[-1] < prev_closes.iloc[0]:
-                return CandlePattern(
-                    name="Hammer",
-                    type="bullish",
-                    index=len(df) - 1,
-                    confidence=0.8,
-                    description="Marteau détecté en bas de tendance - signal de retournement haussier"
-                )
+            if lower_wick >= (lower_wick_ratio * body) and upper_wick <= (upper_wick_max * total_range):
+                # Vérifier tendance baissière précédente
+                prev_closes = df['close'].iloc[-10:-1]
+                if len(prev_closes) >= 2 and prev_closes.iloc[-1] < prev_closes.iloc[0]:
+                    return CandlePattern(
+                        name="Hammer",
+                        type="bullish",
+                        index=len(df) - 1,
+                        confidence=0.8,
+                        description="Marteau détecté en bas de tendance - signal de retournement haussier"
+                    )
+        except (IndexError, KeyError):
+            pass
 
         return None
 
@@ -141,31 +148,34 @@ class PatternDetector:
         - Mèche inférieure ≤ 10% du range
         - Doit apparaître en haut de tendance haussière
         """
-        if len(df) < 10:
-            return None
+        try:
+            if len(df) < 10:
+                return None
 
-        last = df.iloc[-1]
+            last = df.iloc[-1]
 
-        body = abs(last['close'] - last['open'])
-        total_range = last['high'] - last['low']
+            body = abs(last['close'] - last['open'])
+            total_range = last['high'] - last['low']
 
-        if total_range == 0:
-            return None
+            if total_range == 0:
+                return None
 
-        upper_wick = last['high'] - max(last['open'], last['close'])
-        lower_wick = min(last['open'], last['close']) - last['low']
+            upper_wick = last['high'] - max(last['open'], last['close'])
+            lower_wick = min(last['open'], last['close']) - last['low']
 
-        if upper_wick >= (2 * body) and lower_wick <= (0.1 * total_range):
-            # Vérifier tendance haussière précédente
-            prev_closes = df['close'].iloc[-10:-1]
-            if prev_closes.iloc[-1] > prev_closes.iloc[0]:
-                return CandlePattern(
-                    name="Shooting Star",
-                    type="bearish",
-                    index=len(df) - 1,
-                    confidence=0.8,
-                    description="Étoile filante détectée en haut de tendance - signal de retournement baissier"
-                )
+            if upper_wick >= (2 * body) and lower_wick <= (0.1 * total_range):
+                # Vérifier tendance haussière précédente
+                prev_closes = df['close'].iloc[-10:-1]
+                if len(prev_closes) >= 2 and prev_closes.iloc[-1] > prev_closes.iloc[0]:
+                    return CandlePattern(
+                        name="Shooting Star",
+                        type="bearish",
+                        index=len(df) - 1,
+                        confidence=0.8,
+                        description="Étoile filante détectée en haut de tendance - signal de retournement baissier"
+                    )
+        except (IndexError, KeyError):
+            pass
 
         return None
 

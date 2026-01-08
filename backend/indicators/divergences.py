@@ -57,13 +57,19 @@ class DivergenceDetector:
         """
         divergences = []
 
-        if 'rsi' in df.columns:
-            rsi_divs = self._detect_indicator_divergences(df, 'rsi')
-            divergences.extend(rsi_divs)
+        if df is None or df.empty or len(df) < self.lookback:
+            return divergences
 
-        if 'macd' in df.columns:
-            macd_divs = self._detect_indicator_divergences(df, 'macd')
-            divergences.extend(macd_divs)
+        try:
+            if 'rsi' in df.columns:
+                rsi_divs = self._detect_indicator_divergences(df, 'rsi')
+                divergences.extend(rsi_divs)
+
+            if 'macd' in df.columns:
+                macd_divs = self._detect_indicator_divergences(df, 'macd')
+                divergences.extend(macd_divs)
+        except (IndexError, KeyError) as e:
+            logger.debug(f"Error detecting divergences: {e}")
 
         return divergences
 
@@ -87,40 +93,44 @@ class DivergenceDetector:
         if len(df) < self.lookback:
             return divergences
 
-        # Trouver les pivots (highs et lows locaux)
-        price_highs, price_lows = self._find_pivots(df['close'], 5)
-        ind_highs, ind_lows = self._find_pivots(df[indicator], 5)
+        try:
+            # Utiliser uniquement les dernières données pour éviter les problèmes d'index
+            recent_df = df.iloc[-self.lookback:].copy().reset_index(drop=True)
 
-        # Chercher divergences dans la fenêtre récente
-        recent_df = df.iloc[-self.lookback:]
+            # Trouver les pivots sur le DataFrame récent uniquement
+            price_highs, price_lows = self._find_pivots(recent_df['close'], 3)
+            ind_highs, ind_lows = self._find_pivots(recent_df[indicator], 3)
 
-        # Divergence régulière baissière: prix HH, indicateur LH
-        regular_bearish = self._check_regular_bearish(
-            recent_df, indicator, price_highs, ind_highs
-        )
-        if regular_bearish:
-            divergences.append(regular_bearish)
+            # Divergence régulière baissière: prix HH, indicateur LH
+            regular_bearish = self._check_regular_bearish(
+                recent_df, indicator, price_highs, ind_highs
+            )
+            if regular_bearish:
+                divergences.append(regular_bearish)
 
-        # Divergence régulière haussière: prix LL, indicateur HL
-        regular_bullish = self._check_regular_bullish(
-            recent_df, indicator, price_lows, ind_lows
-        )
-        if regular_bullish:
-            divergences.append(regular_bullish)
+            # Divergence régulière haussière: prix LL, indicateur HL
+            regular_bullish = self._check_regular_bullish(
+                recent_df, indicator, price_lows, ind_lows
+            )
+            if regular_bullish:
+                divergences.append(regular_bullish)
 
-        # Divergence cachée haussière: prix HL, indicateur LL
-        hidden_bullish = self._check_hidden_bullish(
-            recent_df, indicator, price_lows, ind_lows
-        )
-        if hidden_bullish:
-            divergences.append(hidden_bullish)
+            # Divergence cachée haussière: prix HL, indicateur LL
+            hidden_bullish = self._check_hidden_bullish(
+                recent_df, indicator, price_lows, ind_lows
+            )
+            if hidden_bullish:
+                divergences.append(hidden_bullish)
 
-        # Divergence cachée baissière: prix LH, indicateur HH
-        hidden_bearish = self._check_hidden_bearish(
-            recent_df, indicator, price_highs, ind_highs
-        )
-        if hidden_bearish:
-            divergences.append(hidden_bearish)
+            # Divergence cachée baissière: prix LH, indicateur HH
+            hidden_bearish = self._check_hidden_bearish(
+                recent_df, indicator, price_highs, ind_highs
+            )
+            if hidden_bearish:
+                divergences.append(hidden_bearish)
+
+        except (IndexError, KeyError) as e:
+            logger.debug(f"Error in divergence detection for {indicator}: {e}")
 
         return divergences
 
