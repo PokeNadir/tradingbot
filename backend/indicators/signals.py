@@ -86,30 +86,40 @@ class SignalGenerator:
         Returns:
             Liste des signaux détectés
         """
-        if df.empty or len(df) < 50:
+        if df is None or df.empty or len(df) < 50:
             return []
 
-        # Calculer tous les indicateurs
-        df = self.technical.calculate_all(df)
-        df = self.smc.analyze(df)
+        try:
+            # Calculer tous les indicateurs
+            df = self.technical.calculate_all(df)
+            df = self.smc.analyze(df)
 
-        # Détecter patterns et divergences
-        detected_patterns = self.patterns.detect_all(df)
-        detected_divergences = self.divergences.detect_all(df)
+            # Vérifier que le DataFrame est toujours valide après calculs
+            if df is None or df.empty or len(df) == 0:
+                logger.debug(f"DataFrame vide après calcul des indicateurs pour {symbol}")
+                return []
 
-        signals = []
+            # Détecter patterns et divergences
+            detected_patterns = self.patterns.detect_all(df)
+            detected_divergences = self.divergences.detect_all(df)
 
-        # Générer signal long
-        long_signal = self._check_long_signal(df, symbol, detected_patterns, detected_divergences)
-        if long_signal:
-            signals.append(self._signal_to_dict(long_signal))
+            signals = []
 
-        # Générer signal short
-        short_signal = self._check_short_signal(df, symbol, detected_patterns, detected_divergences)
-        if short_signal:
-            signals.append(self._signal_to_dict(short_signal))
+            # Générer signal long
+            long_signal = self._check_long_signal(df, symbol, detected_patterns, detected_divergences)
+            if long_signal:
+                signals.append(self._signal_to_dict(long_signal))
 
-        return signals
+            # Générer signal short
+            short_signal = self._check_short_signal(df, symbol, detected_patterns, detected_divergences)
+            if short_signal:
+                signals.append(self._signal_to_dict(short_signal))
+
+            return signals
+
+        except Exception as e:
+            logger.warning(f"Erreur lors de la génération des signaux pour {symbol}: {e}")
+            return []
 
     def _check_long_signal(
         self,
@@ -128,7 +138,13 @@ class SignalGenerator:
         4. Volume: above average
         5. Pattern: bullish pattern
         """
-        last = df.iloc[-1]
+        try:
+            if df is None or df.empty or len(df) == 0:
+                return None
+            last = df.iloc[-1]
+        except (IndexError, KeyError) as e:
+            logger.debug(f"Cannot access last row for long signal: {e}")
+            return None
         reasons = []
         score = 0
         max_score = 10
@@ -238,7 +254,13 @@ class SignalGenerator:
         """
         Vérifie les conditions pour un signal short.
         """
-        last = df.iloc[-1]
+        try:
+            if df is None or df.empty or len(df) == 0:
+                return None
+            last = df.iloc[-1]
+        except (IndexError, KeyError) as e:
+            logger.debug(f"Cannot access last row for short signal: {e}")
+            return None
         reasons = []
         score = 0
         max_score = 10
@@ -365,56 +387,65 @@ class SignalGenerator:
         Returns:
             Dict avec l'analyse complète
         """
-        if df.empty:
+        if df is None or df.empty:
             return {'error': 'No data available'}
 
-        df = self.technical.calculate_all(df)
-        df = self.smc.analyze(df)
+        try:
+            df = self.technical.calculate_all(df)
+            df = self.smc.analyze(df)
 
-        indicators = self.technical.get_current_values(df)
-        patterns = self.patterns.get_patterns_summary(df)
-        divergences = self.divergences.get_divergences_summary(df)
-        smc = self.smc.get_structure_summary()
+            # Vérifier que le DataFrame est toujours valide
+            if df is None or df.empty or len(df) == 0:
+                return {'error': 'DataFrame empty after indicator calculation'}
 
-        # Déterminer le biais global
-        bullish_count = 0
-        bearish_count = 0
+            indicators = self.technical.get_current_values(df)
+            patterns = self.patterns.get_patterns_summary(df)
+            divergences = self.divergences.get_divergences_summary(df)
+            smc = self.smc.get_structure_summary()
 
-        if indicators.get('trend_bias', 0) > 0:
-            bullish_count += 1
-        elif indicators.get('trend_bias', 0) < 0:
-            bearish_count += 1
+            # Déterminer le biais global
+            bullish_count = 0
+            bearish_count = 0
 
-        if indicators.get('rsi', 50) < 40:
-            bullish_count += 1
-        elif indicators.get('rsi', 50) > 60:
-            bearish_count += 1
+            if indicators.get('trend_bias', 0) > 0:
+                bullish_count += 1
+            elif indicators.get('trend_bias', 0) < 0:
+                bearish_count += 1
 
-        if patterns.get('bullish_count', 0) > 0:
-            bullish_count += 1
-        if patterns.get('bearish_count', 0) > 0:
-            bearish_count += 1
+            if indicators.get('rsi', 50) < 40:
+                bullish_count += 1
+            elif indicators.get('rsi', 50) > 60:
+                bearish_count += 1
 
-        if divergences.get('bullish_count', 0) > 0:
-            bullish_count += 1
-        if divergences.get('bearish_count', 0) > 0:
-            bearish_count += 1
+            if patterns.get('bullish_count', 0) > 0:
+                bullish_count += 1
+            if patterns.get('bearish_count', 0) > 0:
+                bearish_count += 1
 
-        if bullish_count > bearish_count:
-            bias = 'BULLISH'
-        elif bearish_count > bullish_count:
-            bias = 'BEARISH'
-        else:
-            bias = 'NEUTRAL'
+            if divergences.get('bullish_count', 0) > 0:
+                bullish_count += 1
+            if divergences.get('bearish_count', 0) > 0:
+                bearish_count += 1
 
-        return {
-            'symbol': symbol,
-            'bias': bias,
-            'bullish_signals': bullish_count,
-            'bearish_signals': bearish_count,
-            'indicators': indicators,
-            'patterns': patterns,
-            'divergences': divergences,
-            'smc': smc,
-            'timestamp': datetime.now().isoformat()
-        }
+            if bullish_count > bearish_count:
+                bias = 'BULLISH'
+            elif bearish_count > bullish_count:
+                bias = 'BEARISH'
+            else:
+                bias = 'NEUTRAL'
+
+            return {
+                'symbol': symbol,
+                'bias': bias,
+                'bullish_signals': bullish_count,
+                'bearish_signals': bearish_count,
+                'indicators': indicators,
+                'patterns': patterns,
+                'divergences': divergences,
+                'smc': smc,
+                'timestamp': datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            logger.warning(f"Erreur lors de l'analyse de marché pour {symbol}: {e}")
+            return {'error': str(e)}
