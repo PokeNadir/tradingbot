@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from backend.config import CONFIG
-from backend.api.routes import router
+from backend.api.routes import router, set_dependencies
 from backend.api.websocket import ConnectionManager
 from backend.data.fetcher import DataFetcher
 from backend.data.database import Database
@@ -62,6 +62,9 @@ async def lifespan(app: FastAPI):
         signal_generator = SignalGenerator(
             CONFIG, technical, patterns, divergences, smc
         )
+
+        # Inject dependencies into API routes
+        set_dependencies(data_fetcher, signal_generator, paper_trader, portfolio, risk_manager)
 
         # Initialize database
         db = Database(CONFIG)
