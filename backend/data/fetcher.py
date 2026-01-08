@@ -5,6 +5,7 @@ Fonctionnalités:
 - Récupération OHLCV multi-timeframes
 - Cache des données
 - Gestion des erreurs et rate limiting
+- Retry automatique avec backoff exponentiel
 """
 
 import ccxt
@@ -13,8 +14,13 @@ import asyncio
 from datetime import datetime
 from typing import Dict, List, Optional
 import logging
+import time
 
 logger = logging.getLogger(__name__)
+
+# Nombre de tentatives pour les requêtes API
+MAX_RETRIES = 3
+RETRY_DELAY = 2  # secondes
 
 
 class DataFetcher:
@@ -47,13 +53,25 @@ class DataFetcher:
             exchange_class = getattr(ccxt, self.exchange_id)
             exchange = exchange_class({
                 'enableRateLimit': self.config.get('exchange', {}).get('rate_limit', True),
-                'options': {'defaultType': 'spot'}
+                'options': {
+                    'defaultType': 'spot',
+                    'adjustForTimeDifference': True
+                },
+                'timeout': 30000,  # 30 secondes timeout
             })
 
-            if self.config.get('exchange', {}).get('testnet', True):
+            # Mode testnet seulement si explicitement activé
+            use_testnet = self.config.get('exchange', {}).get('testnet', False)
+            if use_testnet:
                 if hasattr(exchange, 'set_sandbox_mode'):
                     exchange.set_sandbox_mode(True)
                     logger.info(f"Mode testnet activé pour {self.exchange_id}")
+            else:
+                logger.info(f"Connexion à {self.exchange_id} (API réelle - données publiques)")
+
+            # Charger les marchés
+            exchange.load_markets()
+            logger.info(f"Marchés chargés: {len(exchange.markets)} paires disponibles")
 
             return exchange
         except Exception as e:
@@ -67,7 +85,7 @@ class DataFetcher:
         limit: int = 500
     ) -> pd.DataFrame:
         """
-        Récupère les données OHLCV pour un symbole.
+        Récupère les données OHLCV pour un symbole avec retry automatique.
 
         Args:
             symbol: Paire de trading (ex: 'BTC/USDT')
@@ -77,30 +95,55 @@ class DataFetcher:
         Returns:
             DataFrame avec timestamp, open, high, low, close, volume
         """
-        try:
-            ohlcv = await asyncio.to_thread(
-                self.exchange.fetch_ohlcv,
-                symbol,
-                timeframe,
-                limit=limit
-            )
+        last_error = None
 
-            df = pd.DataFrame(
-                ohlcv,
-                columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
-            )
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            df.set_index('timestamp', inplace=True)
+        for attempt in range(MAX_RETRIES):
+            try:
+                ohlcv = await asyncio.to_thread(
+                    self.exchange.fetch_ohlcv,
+                    symbol,
+                    timeframe,
+                    limit=limit
+                )
 
-            cache_key = f"{symbol}_{timeframe}"
-            self.data_cache[cache_key] = df
+                if not ohlcv or len(ohlcv) == 0:
+                    logger.warning(f"Aucune donnée reçue pour {symbol} {timeframe}")
+                    return pd.DataFrame()
 
-            logger.debug(f"Récupéré {len(df)} bougies pour {symbol} {timeframe}")
-            return df
+                df = pd.DataFrame(
+                    ohlcv,
+                    columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
+                )
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                df.set_index('timestamp', inplace=True)
 
-        except Exception as e:
-            logger.error(f"Erreur fetch_ohlcv {symbol}: {e}")
-            raise
+                # Vérifier la qualité des données
+                if df['close'].isna().any():
+                    logger.warning(f"Données incomplètes pour {symbol} {timeframe}")
+
+                cache_key = f"{symbol}_{timeframe}"
+                self.data_cache[cache_key] = df
+
+                logger.info(f"✓ {symbol} {timeframe}: {len(df)} bougies (dernière: {df.index[-1]})")
+                return df
+
+            except ccxt.NetworkError as e:
+                last_error = e
+                logger.warning(f"Erreur réseau {symbol} (tentative {attempt + 1}/{MAX_RETRIES}): {e}")
+                await asyncio.sleep(RETRY_DELAY * (attempt + 1))
+
+            except ccxt.ExchangeError as e:
+                last_error = e
+                logger.error(f"Erreur exchange {symbol}: {e}")
+                break  # Ne pas réessayer pour les erreurs d'exchange
+
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Erreur {symbol} (tentative {attempt + 1}/{MAX_RETRIES}): {e}")
+                await asyncio.sleep(RETRY_DELAY * (attempt + 1))
+
+        logger.error(f"Échec fetch_ohlcv {symbol} après {MAX_RETRIES} tentatives: {last_error}")
+        return pd.DataFrame()
 
     async def fetch_multi_timeframe(
         self,
@@ -139,7 +182,7 @@ class DataFetcher:
 
     async def fetch_ticker(self, symbol: str) -> dict:
         """
-        Récupère le ticker actuel.
+        Récupère le ticker actuel avec retry automatique.
 
         Args:
             symbol: Paire de trading
@@ -147,27 +190,56 @@ class DataFetcher:
         Returns:
             Dictionnaire avec prix, volume, etc.
         """
-        try:
-            ticker = await asyncio.to_thread(
-                self.exchange.fetch_ticker,
-                symbol
-            )
-            return {
-                'symbol': symbol,
-                'last': ticker.get('last', 0),
-                'bid': ticker.get('bid', 0),
-                'ask': ticker.get('ask', 0),
-                'high_24h': ticker.get('high', 0),
-                'low_24h': ticker.get('low', 0),
-                'volume_24h': ticker.get('baseVolume', 0),
-                'change_24h': ticker.get('percentage', 0),
-                'spread': ((ticker.get('ask', 0) - ticker.get('bid', 0)) / ticker.get('last', 1)
-                          if ticker.get('last') else 0),
-                'timestamp': datetime.now().isoformat()
-            }
-        except Exception as e:
-            logger.error(f"Erreur fetch_ticker {symbol}: {e}")
-            raise
+        for attempt in range(MAX_RETRIES):
+            try:
+                ticker = await asyncio.to_thread(
+                    self.exchange.fetch_ticker,
+                    symbol
+                )
+
+                last_price = ticker.get('last', 0) or 0
+                bid_price = ticker.get('bid', 0) or 0
+                ask_price = ticker.get('ask', 0) or 0
+
+                spread = 0
+                if last_price > 0 and bid_price > 0 and ask_price > 0:
+                    spread = (ask_price - bid_price) / last_price
+
+                return {
+                    'symbol': symbol,
+                    'last': last_price,
+                    'bid': bid_price,
+                    'ask': ask_price,
+                    'high_24h': ticker.get('high', 0) or 0,
+                    'low_24h': ticker.get('low', 0) or 0,
+                    'volume_24h': ticker.get('baseVolume', 0) or 0,
+                    'change_24h': ticker.get('percentage', 0) or 0,
+                    'spread': spread,
+                    'timestamp': datetime.now().isoformat()
+                }
+
+            except ccxt.NetworkError as e:
+                logger.warning(f"Erreur réseau ticker {symbol} (tentative {attempt + 1}): {e}")
+                await asyncio.sleep(RETRY_DELAY)
+
+            except Exception as e:
+                logger.warning(f"Erreur ticker {symbol}: {e}")
+                break
+
+        # Retourner des valeurs par défaut en cas d'échec
+        return {
+            'symbol': symbol,
+            'last': 0,
+            'bid': 0,
+            'ask': 0,
+            'high_24h': 0,
+            'low_24h': 0,
+            'volume_24h': 0,
+            'change_24h': 0,
+            'spread': 0,
+            'timestamp': datetime.now().isoformat(),
+            'error': True
+        }
 
     async def fetch_all_tickers(self) -> Dict[str, dict]:
         """Récupère les tickers pour tous les symboles configurés."""

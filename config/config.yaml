@@ -14,7 +14,7 @@ paper_trading:
 # Exchange configuration
 exchange:
   name: "binance"
-  testnet: true
+  testnet: false  # false = API réelle (données publiques, pas besoin de clé API)
   rate_limit: true
 
 # Symboles à trader
