@@ -90,6 +90,23 @@ class PatternDetector:
             if three_crows:
                 patterns.append(three_crows)
 
+            # Patterns supplémentaires selon logique.md
+            tweezer = self.detect_tweezer(df)
+            if tweezer:
+                patterns.append(tweezer)
+
+            harami = self.detect_harami(df)
+            if harami:
+                patterns.append(harami)
+
+            piercing = self.detect_piercing_dark_cloud(df)
+            if piercing:
+                patterns.append(piercing)
+
+            marubozu = self.detect_marubozu(df)
+            if marubozu:
+                patterns.append(marubozu)
+
         except (IndexError, KeyError) as e:
             logger.debug(f"Error detecting patterns: {e}")
 
@@ -403,6 +420,200 @@ class PatternDetector:
             confidence=0.85,
             description="Trois corbeaux noirs - fort signal baissier"
         )
+
+    def detect_tweezer(self, df: pd.DataFrame) -> Optional[CandlePattern]:
+        """
+        Détecte Tweezer Tops/Bottoms selon logique.md.
+
+        Critères algorithmiques:
+        - Tweezer Top: high[i] ≈ high[i-1] (tolérance 0.1%)
+        - Tweezer Bottom: low[i] ≈ low[i-1] (tolérance 0.1%)
+        - Bougies de couleurs opposées
+        """
+        if len(df) < 2:
+            return None
+
+        current = df.iloc[-1]
+        prev = df.iloc[-2]
+        tolerance = 0.001  # 0.1%
+
+        # Tweezer Top (bearish)
+        high_match = abs(current['high'] - prev['high']) / prev['high'] <= tolerance
+        if high_match:
+            # Bougie précédente haussière, actuelle baissière
+            if prev['close'] > prev['open'] and current['close'] < current['open']:
+                return CandlePattern(
+                    name="Tweezer Top",
+                    type="bearish",
+                    index=len(df) - 1,
+                    confidence=0.75,
+                    description="Tweezer Top - potentiel retournement baissier"
+                )
+
+        # Tweezer Bottom (bullish)
+        low_match = abs(current['low'] - prev['low']) / prev['low'] <= tolerance
+        if low_match:
+            # Bougie précédente baissière, actuelle haussière
+            if prev['close'] < prev['open'] and current['close'] > current['open']:
+                return CandlePattern(
+                    name="Tweezer Bottom",
+                    type="bullish",
+                    index=len(df) - 1,
+                    confidence=0.75,
+                    description="Tweezer Bottom - potentiel retournement haussier"
+                )
+
+        return None
+
+    def detect_harami(self, df: pd.DataFrame) -> Optional[CandlePattern]:
+        """
+        Détecte Harami (Inside Bar) selon logique.md.
+
+        Critères algorithmiques:
+        - Bullish: candle[i] entièrement contenue dans candle[i-1]
+        - high[i] < high[i-1] AND low[i] > low[i-1]
+        - Corps de la petite bougie < 50% du corps de la grande
+        """
+        if len(df) < 2:
+            return None
+
+        current = df.iloc[-1]
+        prev = df.iloc[-2]
+
+        # Vérifier que la bougie actuelle est contenue dans la précédente
+        is_inside = (current['high'] < prev['high'] and current['low'] > prev['low'])
+        if not is_inside:
+            return None
+
+        current_body = abs(current['close'] - current['open'])
+        prev_body = abs(prev['close'] - prev['open'])
+
+        # Corps de la petite bougie < 50% de la grande
+        if prev_body > 0 and current_body / prev_body > 0.5:
+            return None
+
+        # Bullish Harami: grande bougie baissière, petite haussière
+        if prev['close'] < prev['open'] and current['close'] > current['open']:
+            return CandlePattern(
+                name="Bullish Harami",
+                type="bullish",
+                index=len(df) - 1,
+                confidence=0.7,
+                description="Harami haussier - indécision après mouvement baissier"
+            )
+
+        # Bearish Harami: grande bougie haussière, petite baissière
+        if prev['close'] > prev['open'] and current['close'] < current['open']:
+            return CandlePattern(
+                name="Bearish Harami",
+                type="bearish",
+                index=len(df) - 1,
+                confidence=0.7,
+                description="Harami baissier - indécision après mouvement haussier"
+            )
+
+        return None
+
+    def detect_piercing_dark_cloud(self, df: pd.DataFrame) -> Optional[CandlePattern]:
+        """
+        Détecte Piercing Line / Dark Cloud Cover selon logique.md.
+
+        Piercing Line (bullish):
+        - Bougie 1 baissière, Bougie 2 haussière
+        - Open[2] < Low[1] (gap down)
+        - Close[2] > midpoint(body[1]) mais < Open[1]
+
+        Dark Cloud Cover (bearish):
+        - Bougie 1 haussière, Bougie 2 baissière
+        - Open[2] > High[1] (gap up)
+        - Close[2] < midpoint(body[1]) mais > Open[1]
+        """
+        if len(df) < 2:
+            return None
+
+        current = df.iloc[-1]
+        prev = df.iloc[-2]
+
+        prev_midpoint = (prev['open'] + prev['close']) / 2
+
+        # Piercing Line (bullish)
+        if (prev['close'] < prev['open'] and  # Bougie 1 baissière
+            current['close'] > current['open'] and  # Bougie 2 haussière
+            current['open'] < prev['low'] and  # Gap down
+            current['close'] > prev_midpoint and  # Pénètre > 50%
+            current['close'] < prev['open']):  # Ne dépasse pas l'open de prev
+            return CandlePattern(
+                name="Piercing Line",
+                type="bullish",
+                index=len(df) - 1,
+                confidence=0.8,
+                description="Piercing Line - fort signal de retournement haussier"
+            )
+
+        # Dark Cloud Cover (bearish)
+        if (prev['close'] > prev['open'] and  # Bougie 1 haussière
+            current['close'] < current['open'] and  # Bougie 2 baissière
+            current['open'] > prev['high'] and  # Gap up
+            current['close'] < prev_midpoint and  # Pénètre > 50%
+            current['close'] > prev['open']):  # Ne dépasse pas l'open de prev
+            return CandlePattern(
+                name="Dark Cloud Cover",
+                type="bearish",
+                index=len(df) - 1,
+                confidence=0.8,
+                description="Dark Cloud Cover - fort signal de retournement baissier"
+            )
+
+        return None
+
+    def detect_marubozu(self, df: pd.DataFrame) -> Optional[CandlePattern]:
+        """
+        Détecte Marubozu selon logique.md.
+
+        Critères algorithmiques:
+        - Corps représente > 95% du range total
+        - Pas de mèches significatives
+        - Signal de forte conviction
+
+        Bullish Marubozu: Open ≈ Low, Close ≈ High
+        Bearish Marubozu: Open ≈ High, Close ≈ Low
+        """
+        if len(df) < 1:
+            return None
+
+        last = df.iloc[-1]
+        body = abs(last['close'] - last['open'])
+        total_range = last['high'] - last['low']
+
+        if total_range == 0:
+            return None
+
+        # Corps doit être > 95% du range
+        body_ratio = body / total_range
+        if body_ratio < 0.95:
+            return None
+
+        # Bullish Marubozu
+        if last['close'] > last['open']:
+            return CandlePattern(
+                name="Bullish Marubozu",
+                type="bullish",
+                index=len(df) - 1,
+                confidence=0.85,
+                description="Marubozu haussier - très forte pression acheteuse"
+            )
+
+        # Bearish Marubozu
+        if last['close'] < last['open']:
+            return CandlePattern(
+                name="Bearish Marubozu",
+                type="bearish",
+                index=len(df) - 1,
+                confidence=0.85,
+                description="Marubozu baissier - très forte pression vendeuse"
+            )
+
+        return None
 
     def add_pattern_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """

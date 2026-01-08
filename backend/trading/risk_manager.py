@@ -10,12 +10,36 @@ Implémente (selon TRADING_STRATEGIES_GUIDE.md):
 
 import pandas as pd
 import numpy as np
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, List
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from scipy import stats
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class KellyResult:
+    """Résultat du calcul Kelly Criterion selon logique.md."""
+    full_kelly: float        # f* = (p × b - q) / b
+    half_kelly: float        # 50% du Kelly
+    quarter_kelly: float     # 25% du Kelly (recommandé)
+    recommended: float       # Fraction recommandée
+    win_rate: float          # Taux de gain utilisé
+    avg_win_loss_ratio: float  # Ratio gain/perte utilisé
+
+
+@dataclass
+class VaRResult:
+    """Résultat du calcul Value at Risk selon logique.md."""
+    var_95: float            # VaR à 95% de confiance
+    var_99: float            # VaR à 99% de confiance
+    cvar_95: float           # Expected Shortfall (CVaR) à 95%
+    max_position_95: float   # Position max selon VaR 95%
+    max_position_99: float   # Position max selon VaR 99%
+    volatility: float        # Volatilité utilisée
+    time_horizon: int        # Horizon en jours
 
 
 @dataclass
@@ -81,6 +105,258 @@ class RiskManager:
         self.consecutive_losses = 0
         self.pause_until: Optional[datetime] = None
         self.trade_history: list = []
+
+        # Historique pour calcul VaR et Kelly
+        self.returns_history: List[float] = []
+        self.wins: int = 0
+        self.losses: int = 0
+        self.total_win_amount: float = 0.0
+        self.total_loss_amount: float = 0.0
+
+    def calculate_kelly_criterion(
+        self,
+        win_rate: Optional[float] = None,
+        avg_win_loss_ratio: Optional[float] = None
+    ) -> KellyResult:
+        """
+        Calcule le Kelly Criterion selon logique.md.
+
+        Formule: f* = (p × b - q) / b
+
+        Où:
+        - p = probabilité de gain
+        - q = probabilité de perte (1 - p)
+        - b = ratio gain moyen / perte moyenne
+
+        Args:
+            win_rate: Taux de gain (si None, calculé depuis historique)
+            avg_win_loss_ratio: Ratio gain/perte (si None, calculé depuis historique)
+
+        Returns:
+            KellyResult avec les fractions recommandées
+        """
+        # Utiliser les stats historiques si non fournies
+        if win_rate is None:
+            total_trades = self.wins + self.losses
+            if total_trades > 0:
+                win_rate = self.wins / total_trades
+            else:
+                win_rate = 0.5  # Défaut conservateur
+
+        if avg_win_loss_ratio is None:
+            if self.losses > 0 and self.total_loss_amount > 0:
+                avg_win = self.total_win_amount / max(1, self.wins)
+                avg_loss = self.total_loss_amount / self.losses
+                avg_win_loss_ratio = avg_win / avg_loss if avg_loss > 0 else 2.0
+            else:
+                avg_win_loss_ratio = 2.0  # Défaut: R:R de 2:1
+
+        p = win_rate
+        q = 1 - p
+        b = avg_win_loss_ratio
+
+        # Formule Kelly: f* = (p × b - q) / b
+        if b > 0:
+            full_kelly = (p * b - q) / b
+        else:
+            full_kelly = 0
+
+        # Ne jamais risquer plus de 100% ni avoir un Kelly négatif
+        full_kelly = max(0, min(1, full_kelly))
+
+        # Fractions de Kelly
+        half_kelly = full_kelly * 0.5
+        quarter_kelly = full_kelly * 0.25
+
+        # Recommandation: Quarter-Kelly, plafonné au max risk per trade
+        recommended = min(quarter_kelly, self.max_risk_per_trade)
+
+        logger.debug(
+            f"Kelly Criterion: p={p:.2f}, b={b:.2f}, "
+            f"full={full_kelly:.4f}, quarter={quarter_kelly:.4f}"
+        )
+
+        return KellyResult(
+            full_kelly=round(full_kelly, 4),
+            half_kelly=round(half_kelly, 4),
+            quarter_kelly=round(quarter_kelly, 4),
+            recommended=round(recommended, 4),
+            win_rate=round(p, 4),
+            avg_win_loss_ratio=round(b, 4)
+        )
+
+    def calculate_var(
+        self,
+        portfolio_value: float,
+        returns: Optional[List[float]] = None,
+        time_horizon: int = 1,
+        max_loss_percent: float = 0.02
+    ) -> VaRResult:
+        """
+        Calcule la Value at Risk (VaR) selon logique.md.
+
+        Formule: VaR = Portfolio Value × Z-score × σ × √t
+
+        Où:
+        - Z-score: 1.645 (95%) ou 2.326 (99%)
+        - σ = écart-type des rendements
+        - t = horizon temporel en jours
+
+        Args:
+            portfolio_value: Valeur du portfolio
+            returns: Liste des rendements journaliers (si None, utilise historique)
+            time_horizon: Horizon en jours
+            max_loss_percent: Perte max acceptable en %
+
+        Returns:
+            VaRResult avec VaR et limites de position
+        """
+        # Utiliser les rendements historiques si non fournis
+        if returns is None:
+            returns = self.returns_history
+
+        # Calculer la volatilité (écart-type des rendements)
+        if len(returns) >= 5:
+            volatility = np.std(returns)
+        else:
+            # Défaut: volatilité crypto typique (3% journalier)
+            volatility = 0.03
+
+        # Z-scores
+        z_95 = 1.645  # 95% de confiance
+        z_99 = 2.326  # 99% de confiance
+
+        # Calcul VaR: VaR = Portfolio × Z × σ × √t
+        sqrt_t = np.sqrt(time_horizon)
+
+        var_95 = portfolio_value * z_95 * volatility * sqrt_t
+        var_99 = portfolio_value * z_99 * volatility * sqrt_t
+
+        # Conditional VaR (Expected Shortfall) - moyenne des pertes au-delà du VaR
+        if len(returns) >= 20:
+            sorted_returns = sorted(returns)
+            cutoff_idx = int(len(sorted_returns) * 0.05)
+            tail_returns = sorted_returns[:max(1, cutoff_idx)]
+            cvar_95 = portfolio_value * abs(np.mean(tail_returns)) * sqrt_t
+        else:
+            # Approximation: CVaR ≈ VaR × 1.25
+            cvar_95 = var_95 * 1.25
+
+        # Position max basée sur VaR
+        # Position telle que VaR ne dépasse pas max_loss_percent du portfolio
+        if volatility > 0:
+            max_position_95 = (portfolio_value * max_loss_percent) / (z_95 * volatility * sqrt_t)
+            max_position_99 = (portfolio_value * max_loss_percent) / (z_99 * volatility * sqrt_t)
+        else:
+            max_position_95 = portfolio_value * max_loss_percent
+            max_position_99 = portfolio_value * max_loss_percent
+
+        logger.debug(
+            f"VaR: σ={volatility:.4f}, VaR95={var_95:.2f}, VaR99={var_99:.2f}"
+        )
+
+        return VaRResult(
+            var_95=round(var_95, 2),
+            var_99=round(var_99, 2),
+            cvar_95=round(cvar_95, 2),
+            max_position_95=round(max_position_95, 2),
+            max_position_99=round(max_position_99, 2),
+            volatility=round(volatility, 4),
+            time_horizon=time_horizon
+        )
+
+    def calculate_position_size_advanced(
+        self,
+        capital: float,
+        entry_price: float,
+        stop_loss: float,
+        method: str = 'combined'
+    ) -> PositionSize:
+        """
+        Calcule la taille de position avec méthodes avancées selon logique.md.
+
+        Méthodes:
+        - 'fixed': Pourcentage fixe (1-2%)
+        - 'kelly': Kelly Criterion (Quarter-Kelly)
+        - 'var': Basé sur VaR
+        - 'combined': Minimum des 3 méthodes (recommandé)
+
+        Args:
+            capital: Capital disponible
+            entry_price: Prix d'entrée
+            stop_loss: Niveau de stop-loss
+            method: Méthode de calcul
+
+        Returns:
+            PositionSize optimal
+        """
+        stop_distance = abs(entry_price - stop_loss)
+        stop_percent = stop_distance / entry_price if entry_price > 0 else 0.02
+
+        if stop_percent == 0:
+            stop_percent = 0.02
+            stop_distance = entry_price * stop_percent
+
+        # 1. Méthode Fixed Percent
+        fixed_risk = self.max_risk_per_trade
+        fixed_size = (capital * fixed_risk) / stop_distance
+
+        # 2. Méthode Kelly
+        kelly = self.calculate_kelly_criterion()
+        kelly_risk = kelly.recommended
+        kelly_size = (capital * kelly_risk) / stop_distance if kelly_risk > 0 else 0
+
+        # 3. Méthode VaR
+        var = self.calculate_var(capital)
+        var_size = var.max_position_95 / entry_price if entry_price > 0 else 0
+
+        # Sélection selon méthode
+        if method == 'fixed':
+            position_size = fixed_size
+            risk_percent = fixed_risk
+        elif method == 'kelly':
+            position_size = kelly_size
+            risk_percent = kelly_risk
+        elif method == 'var':
+            position_size = var_size
+            risk_percent = (position_size * stop_distance) / capital if capital > 0 else 0
+        else:  # combined: prendre le minimum (plus conservateur)
+            sizes = [s for s in [fixed_size, kelly_size, var_size] if s > 0]
+            position_size = min(sizes) if sizes else fixed_size
+            risk_percent = (position_size * stop_distance) / capital if capital > 0 else 0
+
+        # Vérifier exposition max
+        position_size_quote = position_size * entry_price
+        max_position_quote = capital * self.max_risk_total
+        if position_size_quote > max_position_quote:
+            position_size_quote = max_position_quote
+            position_size = position_size_quote / entry_price
+            risk_percent = (position_size * stop_distance) / capital
+
+        return PositionSize(
+            size=round(position_size, 8),
+            size_quote=round(position_size_quote, 2),
+            risk_amount=round(position_size * stop_distance, 2),
+            risk_percent=round(risk_percent, 4),
+            kelly_full=kelly.full_kelly,
+            kelly_used=kelly.recommended
+        )
+
+    def update_returns_history(self, pnl_percent: float):
+        """Ajoute un rendement à l'historique pour calcul VaR."""
+        self.returns_history.append(pnl_percent / 100)  # Convertir en décimal
+        # Garder les 252 derniers jours (1 an de trading)
+        if len(self.returns_history) > 252:
+            self.returns_history = self.returns_history[-252:]
+
+    def update_win_loss_stats(self, pnl: float):
+        """Met à jour les statistiques wins/losses pour Kelly."""
+        if pnl > 0:
+            self.wins += 1
+            self.total_win_amount += pnl
+        elif pnl < 0:
+            self.losses += 1
+            self.total_loss_amount += abs(pnl)
 
     def calculate_position_size(
         self,
@@ -366,6 +642,10 @@ class RiskManager:
         Returns:
             Dict avec le résumé
         """
+        # Calcul Kelly et VaR actuels
+        kelly = self.calculate_kelly_criterion()
+        var = self.calculate_var(capital) if capital > 0 else None
+
         return {
             'daily_pnl': round(self.daily_pnl, 2),
             'daily_pnl_percent': round(self.daily_pnl / capital * 100, 2) if capital > 0 else 0,
@@ -374,5 +654,28 @@ class RiskManager:
             'pause_remaining_minutes': max(0, (self.pause_until - datetime.now()).seconds // 60) if self.pause_until and datetime.now() < self.pause_until else 0,
             'max_risk_per_trade': self.max_risk_per_trade,
             'max_daily_loss': self.dd_config.get('daily_loss_limit', 0.03),
-            'max_drawdown': self.dd_config.get('max_drawdown', 0.15)
+            'max_drawdown': self.dd_config.get('max_drawdown', 0.15),
+            # Kelly Criterion
+            'kelly': {
+                'full': kelly.full_kelly,
+                'quarter': kelly.quarter_kelly,
+                'recommended': kelly.recommended,
+                'win_rate': kelly.win_rate,
+                'avg_rr': kelly.avg_win_loss_ratio
+            },
+            # VaR
+            'var': {
+                'var_95': var.var_95 if var else 0,
+                'var_99': var.var_99 if var else 0,
+                'cvar_95': var.cvar_95 if var else 0,
+                'volatility': var.volatility if var else 0.03,
+                'max_position_95': var.max_position_95 if var else 0
+            },
+            # Statistiques de trading
+            'stats': {
+                'total_trades': self.wins + self.losses,
+                'wins': self.wins,
+                'losses': self.losses,
+                'win_rate': self.wins / max(1, self.wins + self.losses)
+            }
         }
